@@ -190,7 +190,7 @@ http://localhost:7861
 | `/health` | Health check for HF and UptimeRobot |
 | `/status` | JSON status |
 | `/app/` | Proxied Hermes dashboard/app |
-| `/v1/models` | Proxied Hermes OpenAI-compatible API server |
+| `/v1/*` | Proxied Hermes OpenAI-compatible API routes |
 | `/telegram` | Telegram webhook endpoint |
 
 The `/v1/*` routes require:

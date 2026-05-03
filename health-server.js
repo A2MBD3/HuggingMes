@@ -14,7 +14,6 @@ const startTime = Date.now();
 const API_SERVER_KEY = process.env.API_SERVER_KEY || "";
 const APP_BASE = "/app";
 const LOGIN_PATH = "/login";
-const LOGOUT_PATH = "/logout";
 const SESSION_COOKIE = "huggingmess_session";
 
 const SYNC_STATUS_FILE = "/tmp/huggingmess-sync-status.json";
@@ -83,11 +82,6 @@ function isHttpsRequest(req) {
 function buildSessionCookie(req) {
   const secure = isHttpsRequest(req) ? "; Secure" : "";
   return `${SESSION_COOKIE}=${encodeURIComponent(expectedSessionValue())}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${secure}`;
-}
-
-function buildClearSessionCookie(req) {
-  const secure = isHttpsRequest(req) ? "; Secure" : "";
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
 function getBearerToken(req) {
@@ -240,20 +234,12 @@ async function handleLogin(req, res, parsed) {
   }
 }
 
-function handleLogout(req, res) {
-  res.writeHead(302, {
-    location: LOGIN_PATH,
-    "set-cookie": buildClearSessionCookie(req),
-    "cache-control": "no-store",
-  });
-  res.end();
-}
-
-function proxyRequest(req, res, targetPort, rewritePath = (path) => path) {
+function proxyRequest(req, res, targetPort, rewritePath = (path) => path, headerOverrides = {}) {
   const parsed = new URL(req.url, "http://localhost");
   const targetPath = rewritePath(parsed.pathname) + parsed.search;
   const headers = {
     ...req.headers,
+    ...headerOverrides,
     host: `${GATEWAY_HOST}:${targetPort}`,
     "x-forwarded-host": req.headers.host || "",
     "x-forwarded-proto": req.headers["x-forwarded-proto"] || "https",
@@ -361,8 +347,6 @@ function renderDashboard(data) {
   const syncTone = ["success", "restored", "synced", "configured"].includes(syncStatus) ? "ok" : syncStatus === "disabled" ? "warn" : "neutral";
   const telegramTone = data.telegram.configured ? (data.telegram.webhookListening || !data.telegram.webhook ? "ok" : "warn") : "warn";
   const keepAliveTone = data.uptimerobot?.configured ? "ok" : process.env.UPTIMEROBOT_API_KEY ? "warn" : "neutral";
-  const publicBase = process.env.SPACE_HOST ? `https://${process.env.SPACE_HOST}` : `http://localhost:${PORT}`;
-  const apiCurl = `curl -H "Authorization: Bearer $GATEWAY_TOKEN" ${publicBase}/v1/models`;
   const gatewayDetail = data.gateway
     ? `OpenAI-compatible API is listening on internal port <code>${data.ports.gateway}</code>.`
     : `Gateway API is not reachable on internal port <code>${data.ports.gateway}</code>.`;
@@ -388,7 +372,7 @@ function renderDashboard(data) {
       value: toneBadge(data.gateway ? "Online" : "Offline", data.gateway ? "ok" : "off"),
       detail: gatewayDetail,
       tone: data.gateway ? "ok" : "off",
-      meta: `<code>/v1/models</code> requires token auth.`,
+      meta: `API routes are protected by <code>GATEWAY_TOKEN</code>.`,
     }),
     renderTile({
       title: "Hermes App",
@@ -471,7 +455,9 @@ function renderDashboard(data) {
     .tile-detail { color:var(--soft); line-height:1.45; font-size:.86rem; }
     .tile-meta { color:var(--muted); line-height:1.4; font-size:.78rem; margin-top:auto; overflow-wrap:anywhere; }
     .panel { border:1px solid var(--line); background:var(--panel2); border-radius:8px; padding:14px; margin-top:10px; }
-    .panel-title { color:var(--muted); font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; font-weight:800; margin-bottom:10px; }
+    .launch-panel { display:flex; align-items:center; justify-content:space-between; gap:18px; }
+    .panel-title { color:var(--muted); font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; font-weight:800; margin-bottom:7px; }
+    .panel-copy { color:var(--soft); line-height:1.45; font-size:.9rem; margin:0; }
     code { background:#0d0d0d; border:1px solid var(--line); border-radius:6px; padding:2px 5px; color:var(--text); font-size:.9em; }
     pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; background:#0d0d0d; border:1px solid var(--line); border-radius:7px; padding:10px; color:var(--soft); font-size:.82rem; line-height:1.45; }
     .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
@@ -485,6 +471,7 @@ function renderDashboard(data) {
     .button.secondary { color:var(--text); background:#242424; border:1px solid var(--line); }
     .button.subtle { color:var(--soft); background:transparent; border:1px solid var(--line); }
     @media (max-width: 980px) { .overview { grid-template-columns:repeat(2, minmax(0, 1fr)); } header { display:block; } .top-actions { justify-content:flex-start; margin-top:14px; min-width:0; } }
+    @media (max-width: 760px) { .launch-panel { display:block; } .launch-panel .button { margin-top:12px; width:100%; } }
     @media (max-width: 620px) { main { width:min(100% - 20px, 1180px); padding-top:16px; } .overview { grid-template-columns:1fr; } h1 { font-size:2rem; } }
   </style>
 </head>
@@ -497,17 +484,18 @@ function renderDashboard(data) {
       </div>
       <div class="top-actions">
         <a class="button" href="${APP_BASE}/" target="_blank" rel="noopener noreferrer">Open App</a>
-        <a class="button secondary" href="/v1/models" target="_blank" rel="noopener noreferrer">Models</a>
         <a class="button secondary" href="/status">Status JSON</a>
-        <a class="button subtle" href="${LOGOUT_PATH}">Logout</a>
       </div>
     </header>
     <section class="overview">
       ${tiles}
     </section>
-    <section class="panel">
-      <div class="panel-title">API Access</div>
-      <pre>${escapeHtml(apiCurl)}</pre>
+    <section class="panel launch-panel">
+      <div>
+        <div class="panel-title">Hermes Agent</div>
+        <p class="panel-copy">Open the full Hermes Agent dashboard in a new window. You will be asked for only your <code>GATEWAY_TOKEN</code> if your session is not already active.</p>
+      </div>
+      <a class="button" href="${APP_BASE}/" target="_blank" rel="noopener noreferrer">Open Hermes Agent</a>
     </section>
   </main>
 </body>
@@ -520,11 +508,6 @@ const server = http.createServer(async (req, res) => {
 
   if (path === LOGIN_PATH) {
     await handleLogin(req, res, parsed);
-    return;
-  }
-
-  if (path === LOGOUT_PATH) {
-    handleLogout(req, res);
     return;
   }
 
@@ -610,7 +593,10 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ error: "unauthorized", message: "Use Authorization: Bearer <GATEWAY_TOKEN>." }));
       return;
     }
-    proxyRequest(req, res, GATEWAY_PORT);
+    const upstreamHeaders = getBearerToken(req) || !API_SERVER_KEY
+      ? {}
+      : { authorization: `Bearer ${API_SERVER_KEY}` };
+    proxyRequest(req, res, GATEWAY_PORT, (p) => p, upstreamHeaders);
     return;
   }
 
