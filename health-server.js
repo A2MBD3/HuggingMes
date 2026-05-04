@@ -415,9 +415,11 @@ function renderDashboard(data) {
     : "No status yet";
   const keepAliveDetail = keepaliveConfigured
     ? `Pinging <code>${escapeHtml(data.keepalive.targetUrl || "/health")}</code>`
-    : process.env.CLOUDFLARE_WORKERS_TOKEN
-      ? "Worker pending or failed"
-      : "Not configured";
+    : keepaliveStatus === "error" && data.keepalive?.message
+      ? escapeHtml(data.keepalive.message)
+      : process.env.CLOUDFLARE_WORKERS_TOKEN
+        ? "Worker pending or failed"
+        : "Not configured";
   const serviceOk = data.gateway && data.dashboard;
 
   const tiles = [
