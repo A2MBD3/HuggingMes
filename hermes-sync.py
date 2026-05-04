@@ -7,6 +7,8 @@ import logging
 import os
 import shutil
 import signal
+import random
+import socket
 import sys
 import tempfile
 import threading
@@ -23,6 +25,7 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", "/opt/data"))
 STATUS_FILE = Path("/tmp/huggingmes-sync-status.json")
+STATE_FILE = HERMES_HOME / ".huggingmes-sync-state.json"
 INTERVAL = int(os.environ.get("SYNC_INTERVAL", "600"))
 INITIAL_DELAY = int(os.environ.get("SYNC_START_DELAY", "10"))
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
@@ -41,7 +44,7 @@ EXCLUDED_DIRS = {
     "node_modules",
     "venv",
 }
-EXCLUDED_TOP_LEVEL = {"logs"}
+EXCLUDED_TOP_LEVEL = {"logs", STATE_FILE.name}
 if not INCLUDE_ENV:
     EXCLUDED_TOP_LEVEL.add(".env")
 
@@ -50,15 +53,41 @@ STOP_EVENT = threading.Event()
 _REPO_ID_CACHE: str | None = None
 
 
-def write_status(status: str, message: str) -> None:
+def write_status(status: str, message: str, fingerprint: str | None = None, marker: tuple[int, int, int] | None = None) -> None:
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     payload = {
         "status": status,
         "message": message,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "timestamp": timestamp,
     }
+    
+    # Update temporary status file for health checks/dashboard
     tmp_path = STATUS_FILE.with_suffix(".tmp")
-    tmp_path.write_text(json.dumps(payload), encoding="utf-8")
-    tmp_path.replace(STATUS_FILE)
+    try:
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        tmp_path.replace(STATUS_FILE)
+    except OSError:
+        pass
+
+    # Update persistent state file in HERMES_HOME
+    if fingerprint or marker:
+        state = {}
+        if STATE_FILE.exists():
+            try:
+                state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        
+        if fingerprint:
+            state["last_fingerprint"] = fingerprint
+        if marker:
+            state["last_marker"] = list(marker)
+        state["last_sync"] = timestamp
+        
+        try:
+            STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+        except OSError:
+            pass
 
 
 def resolve_backup_repo() -> str:
@@ -213,45 +242,45 @@ def restore() -> bool:
 
 
 def sync_once(last_fingerprint: str | None = None, last_marker: tuple[int, int, int] | None = None):
-    if not HF_TOKEN:
-        write_status("disabled", "HF_TOKEN is not configured.")
-        return (last_fingerprint or "", last_marker or (0, 0, 0))
+    # If no state provided, try to load from persistent state file
+    if last_fingerprint is None and last_marker is None:
+        if STATE_FILE.exists():
+            try:
+                state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+                last_fingerprint = state.get("last_fingerprint")
+                m = state.get("last_marker")
+                if m and len(m) == 3:
+                    last_marker = tuple(m)
+            except Exception:
+                pass
 
     repo_id = ensure_repo_exists()
     current_marker = metadata_marker(HERMES_HOME)
     if last_marker is not None and current_marker == last_marker:
-        write_status("synced", "No Hermes state changes detected.")
+        write_status("synced", "No Hermes state changes detected (marker match).")
         return (last_fingerprint or "", current_marker)
 
     current_fingerprint = fingerprint_dir(HERMES_HOME)
     if last_fingerprint is not None and current_fingerprint == last_fingerprint:
-        write_status("synced", "No Hermes state changes detected.")
+        write_status("synced", "No Hermes state changes detected (fingerprint match).")
         return (last_fingerprint, current_marker)
 
-    write_status("syncing", f"Uploading Hermes state to {repo_id}")
+    hostname = socket.gethostname()
+    write_status("syncing", f"Uploading Hermes state to {repo_id} from {hostname}")
     snapshot_dir = create_snapshot_dir(HERMES_HOME)
     try:
-        try:
-            HF_API.upload_large_folder(
-                repo_id=repo_id,
-                repo_type="dataset",
-                folder_path=str(snapshot_dir),
-                num_workers=2,
-                print_report=False,
-            )
-        except AttributeError:
-            upload_folder(
-                folder_path=str(snapshot_dir),
-                repo_id=repo_id,
-                repo_type="dataset",
-                token=HF_TOKEN,
-                commit_message=f"HuggingMes sync {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
-                ignore_patterns=[".git/*", ".git"],
-            )
+        upload_folder(
+            folder_path=str(snapshot_dir),
+            repo_id=repo_id,
+            repo_type="dataset",
+            token=HF_TOKEN,
+            commit_message=f"HuggingMes sync [{hostname}] {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
+            ignore_patterns=[".git/*", ".git"],
+        )
     finally:
         shutil.rmtree(snapshot_dir, ignore_errors=True)
 
-    write_status("success", f"Uploaded Hermes state to {repo_id}")
+    write_status("success", f"Uploaded Hermes state to {repo_id}", fingerprint=current_fingerprint, marker=current_marker)
     return (current_fingerprint, current_marker)
 
 
@@ -281,7 +310,10 @@ def loop() -> int:
         except Exception as exc:
             write_status("error", f"Sync failed: {exc}")
             print(f"Hermes sync failed: {exc}")
-        if STOP_EVENT.wait(INTERVAL):
+        
+        # Add 10% jitter to interval to avoid synchronized commits from multiple containers
+        jitter = random.uniform(0.9, 1.1)
+        if STOP_EVENT.wait(INTERVAL * jitter):
             break
     return 0
 
