@@ -461,6 +461,9 @@ function renderDashboard(data) {
       value: toneBadge(syncStatus.toUpperCase(), syncTone),
       detail: backupDetail,
       tone: syncTone,
+      meta: data.backup?.timestamp
+        ? `<span class="local-time" data-iso="${data.backup.timestamp}"></span>`
+        : "",
     }),
     renderTile({
       title: "Keep Awake",
@@ -532,6 +535,14 @@ function renderDashboard(data) {
     </section>
     <footer><span class="live">Live</span> status - Health endpoint: <code>/health</code></footer>
   </main>
+  <script>
+    document.querySelectorAll('.local-time').forEach(el => {
+      const date = new Date(el.getAttribute('data-iso'));
+      if (!isNaN(date)) {
+        el.textContent = 'At ' + date.toLocaleTimeString();
+      }
+    });
+  </script>
 </body>
 </html>`;
 }
