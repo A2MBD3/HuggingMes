@@ -170,9 +170,10 @@ Use either the Hermes model wizard or a direct `config.yaml` entry with a `base_
 
 To use Hermes via Telegram:
 
-1. Add `TELEGRAM_BOT_TOKEN` from [@BotFather](https://t.me/BotFather).
-2. Add `TELEGRAM_ALLOWED_USERS` if you want to restrict access.
-3. Add `CLOUDFLARE_WORKERS_TOKEN` if you need automatic outbound proxying for Telegram API traffic.
+1. Create a bot via [@BotFather](https://t.me/BotFather): send `/newbot`, follow the prompts, and copy the bot token.
+2. Find your Telegram user ID with [@userinfobot](https://t.me/userinfobot) — send it any message and it replies with your numeric user ID.
+3. Add `TELEGRAM_ALLOWED_USERS` as a comma-separated list of those numeric user IDs to restrict access.
+4. Add `CLOUDFLARE_WORKERS_TOKEN` if you need automatic outbound proxying for Telegram API traffic.
 
 ## 🌐 Cloudflare Proxy
 
