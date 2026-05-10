@@ -17,6 +17,8 @@ from pathlib import Path
 
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "300")   # 5 min — default 10s causes timeout on large state
+os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")   # faster multipart upload/download
 
 from huggingface_hub import HfApi, snapshot_download, upload_folder
 from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
