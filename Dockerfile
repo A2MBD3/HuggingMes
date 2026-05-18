@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     jq \
     python3 \
+    python3-venv \
+    python3-pip \
     chromium \
     libnss3 \
     libatk1.0-0 \
