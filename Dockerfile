@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         || apt-get install -y --no-install-recommends libasound2t64 2>/dev/null \
         || true) \
     && rm -rf /var/lib/apt/lists/* \
-    && /opt/hermes/.venv/bin/uv pip install --no-cache-dir \
+    && uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
         huggingface_hub \
         hf_transfer \
         "jupyterlab>=4.0,<5" \
